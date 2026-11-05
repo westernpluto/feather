@@ -27,6 +27,17 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
 
+      # Each build gets its own visible version (2.9.0 -> 2.9.<run>), because
+      # Feather's update check compares versions: with a fixed 2.9.0 it would
+      # never see a newer build of itself.
+      - name: Version
+        run: |
+          BASE=$(grep '^FEATHER_PROJECT_VERSION=' Feather.xcconfig | cut -d= -f2)
+          VERSION="${BASE%.*}.${{ github.run_number }}"
+          sed -i '' "s/^FEATHER_PROJECT_VERSION=.*/FEATHER_PROJECT_VERSION=$VERSION/" Feather.xcconfig
+          grep '^FEATHER_PROJECT_VERSION=' Feather.xcconfig
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Build
         run: |
           set -o pipefail
@@ -49,6 +60,30 @@ jobs:
             Feather with per-bundle provisioning profiles for app extensions
             (branch `${{ github.ref_name }}`, commit ${{ github.sha }}).
 
+            Version ${{ env.APP_VERSION }}.
+
             Install: download Feather.ipa on your iPhone and sign it with your current Feather.
             Then open a certificate in Settings → Certificates and use **Add Extension Profile**.
           files: packages/Feather.ipa
+
+      # A source at a fixed address that always lists the newest build, so Feather
+      # can update itself (Update & Install, or Sign Updates Automatically):
+      # https://github.com/<owner>/<repo>/releases/download/feather-source/feather-source.json
+      - name: Write Feather source
+        run: |
+          python3 .github/scripts/feather_source.py "${{ github.repository }}" "$APP_VERSION" \
+            "${{ github.run_number }}" "multi-profile-${{ github.run_number }}" \
+            packages/Feather.ipa feather-source.json
+
+      - name: Publish Feather source
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: feather-source
+          name: Feather source (always the newest build)
+          prerelease: true
+          make_latest: false
+          overwrite_files: true
+          body: |
+            Add this source in Feather to get this fork's updates:
+            https://github.com/${{ github.repository }}/releases/download/feather-source/feather-source.json
+          files: feather-source.json
