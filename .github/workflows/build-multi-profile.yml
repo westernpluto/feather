@@ -13,7 +13,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-26
+    # The xcode-27 image has had reliable runner availability.
+    runs-on: xcode-27
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -23,7 +24,7 @@ jobs:
 
       - name: Select Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.3.0.app
+          sudo xcode-select -s /Applications/Xcode_27.1.app
           xcodebuild -version
 
       - name: Build
