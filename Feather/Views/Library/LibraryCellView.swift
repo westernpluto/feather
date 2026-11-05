@@ -111,6 +111,11 @@ struct LibraryCellView: View {
 				selectedInstallAppPresenting = AnyApp(base: app)
 			}
 			if let update = _signedUpdateConfirmation {
+				// Feather fork: download, sign with the same certificate and saved
+				// rules (bundle ID, extension profiles), then offer to install.
+				Button(.localized("Update & Install"), systemImage: "arrow.down.app") {
+					AutoUpdateSigner.shared.updateAndInstall(update, for: app)
+				}
 				Button(.localized("Download Update"), systemImage: "arrow.down.circle") {
 					_startUpdateDownload(update)
 				}

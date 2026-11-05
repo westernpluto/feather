@@ -17,6 +17,7 @@ enum FR {
 		_ ipa: URL,
 		download: Download? = nil,
 		sourceProvenance: SourceAppProvenance? = nil,
+		onImported: ((String) -> Void)? = nil,
 		completion: @escaping (Error?) -> Void
 	) {
 		Task.detached {
@@ -32,8 +33,10 @@ enum FR {
 				try await handler.move()
 				try await handler.addToDatabase()
 				try? await handler.clean()
+				let importedUUID = handler.importedUUID
 				await MainActor.run {
 					completion(nil)
+					onImported?(importedUUID)
 				}
 			} catch {
 				try? await handler.clean()

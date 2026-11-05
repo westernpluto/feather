@@ -12,6 +12,8 @@ import SwiftUI
 final class AppFileHandler: NSObject, @unchecked Sendable {
 	private let _fileManager = FileManager.default
 	private let _uuid = UUID().uuidString
+	/// The library ID the imported app gets (Feather fork: used to sign updates automatically).
+	var importedUUID: String { _uuid }
 	private let _uniqueWorkDir: URL
 	var uniqueWorkDirPayload: URL?
 

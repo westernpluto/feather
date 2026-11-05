@@ -176,7 +176,11 @@ class DownloadManager: NSObject, ObservableObject {
 extension DownloadManager: URLSessionDownloadDelegate {
 	
 	func handlePachageFile(url: URL, dl: Download) throws {
-		FR.handlePackageFile(url, download: dl) { err in
+		FR.handlePackageFile(url, download: dl, onImported: { uuid in
+			Task { @MainActor in
+				AutoUpdateSigner.shared.importFinished(downloadID: dl.id, importedUUID: uuid)
+			}
+		}) { err in
 			if err != nil {
 				let generator = UINotificationFeedbackGenerator()
 				generator.notificationOccurred(.error)

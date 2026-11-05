@@ -22,6 +22,9 @@ struct LibraryView: View {
 	@State private var _alertDownloadString: String = "" // for _isDownloadingPresenting
 	@State private var _updateCheckRotation = 0.0
 	@State private var _isUpdateCheckCompleteVisible = false
+	// Feather fork: automatic signing of updates for signed apps.
+	@Environment(\.scenePhase) private var _scenePhase
+	@AppStorage(AutoUpdateSigner.automaticKey) private var _autoSignUpdates = false
 	
 	// MARK: Selection State
 	@State private var _selectedAppUUIDs: Set<String> = []
@@ -237,6 +240,16 @@ struct LibraryView: View {
 			.onChange(of: updateManager.isChecking) { isChecking in
 				_handleUpdateCheckStateChange(isChecking)
 			}
+			// Feather fork: with automatic updates on, check when the Library opens and
+			// whenever Feather comes back to the foreground.
+			.task {
+				if _autoSignUpdates { await _checkForUpdates() }
+			}
+			.onChange(of: _scenePhase) { phase in
+				if phase == .active, _autoSignUpdates {
+					Task { await _checkForUpdates() }
+				}
+			}
 		}
 	}
 }
@@ -291,6 +304,7 @@ extension LibraryView {
 			sources: Array(_sources),
 			localApps: localApps
 		)
+		AutoUpdateSigner.shared.handleCheckResults(signedApps: _signedApps.map { $0 as AppInfoPresentable })
 	}
 	
 	private func _handleUpdateCheckStateChange(_ isChecking: Bool) {

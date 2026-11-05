@@ -13,6 +13,7 @@ struct ConfigurationView: View {
 	@StateObject private var _optionsManager = OptionsManager.shared
 	@State var isRandomAlertPresenting = false
 	@State var randomString = ""
+	@AppStorage(AutoUpdateSigner.automaticKey) private var _autoSignUpdates = false
 	
 	// MARK: Body
 	var body: some View {
@@ -34,6 +35,14 @@ struct ConfigurationView: View {
 				}
 			}footer: {
 				Text(.localized("This allows you to set rules for automatically replacing the Bundle ID/Display Name when signing an app."))
+			}
+			// Feather fork
+			Section {
+				Toggle(isOn: $_autoSignUpdates) {
+					Label(.localized("Sign Updates Automatically"), systemImage: "arrow.down.app")
+				}
+			} footer: {
+				Text(.localized("When an app you signed from a source has an update, Feather downloads it, signs it with the same certificate and the rules above (including extension profiles), then asks to install it. Checks run when you open the Library and when Feather returns to the foreground."))
 			}
 			SigningOptionsView(options: $_optionsManager.options)
 		}
