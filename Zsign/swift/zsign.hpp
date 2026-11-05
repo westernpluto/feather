@@ -35,6 +35,20 @@ int zsign(
 	void(^completionHandler)(BOOL success)
 );
 
+/// Signs an app with one provisioning profile per bundle. `provs[0]` is the main
+/// app's profile; the others are matched to app extensions (and nested apps) by
+/// their application-identifier, so each bundle gets its own embedded profile
+/// and entitlements. `entitlements[i]` (may be an empty string) pairs with `provs[i]`.
+int zsignMulti(
+	NSString *app,
+	NSArray<NSString *> *provs,
+	NSArray<NSString *> *entitlements,
+	NSString *key,
+	NSString *pass,
+	bool dontGenerateEmbeddedMobileProvision,
+	void(^completionHandler)(BOOL success)
+);
+
 int checkCert(
 	NSString *prov,
 	NSString *key,

@@ -235,6 +235,61 @@ int zsign(
 }
 
 
+int zsignMulti(
+	NSString *app,
+	NSArray<NSString *> *provs,
+	NSArray<NSString *> *entitlements,
+	NSString *key,
+	NSString *pass,
+	bool excludeprovion,
+	void(^completionHandler)(BOOL success)
+) {
+	ZTimer atimer;
+
+	string strPath = [app cStringUsingEncoding:NSUTF8StringEncoding];
+	if (!ZFile::IsFileExists(strPath.c_str())) {
+		ZLog::ErrorV(">>> Invalid path! %s\n", strPath.c_str());
+		completionHandler(NO);
+		return -1;
+	}
+	if (provs.count == 0) {
+		completionHandler(NO);
+		return -1;
+	}
+
+	string strCertFile;
+	string strPKeyFile = [key cStringUsingEncoding:NSUTF8StringEncoding];
+	string strPassword = [pass cStringUsingEncoding:NSUTF8StringEncoding];
+
+	// The first asset is the main app's; ZBundle falls back to it for any bundle
+	// that no other profile matches.
+	list<ZSignAsset> assets;
+	for (NSUInteger i = 0; i < provs.count; i++) {
+		string strProvFile = [provs[i] cStringUsingEncoding:NSUTF8StringEncoding];
+		string strEntitleFile;
+		if (i < entitlements.count) {
+			strEntitleFile = [entitlements[i] cStringUsingEncoding:NSUTF8StringEncoding];
+		}
+		assets.emplace_back();
+		if (!assets.back().Init(strCertFile, strPKeyFile, strProvFile, strEntitleFile, strPassword, false, false, false)) {
+			ZLog::ErrorV(">>> Can't load signing asset for profile %s\n", strProvFile.c_str());
+			completionHandler(NO);
+			return -1;
+		}
+		ZLog::PrintV(">>> Profile %lu: %s\n", (unsigned long)i, assets.back().m_strApplicationId.c_str());
+	}
+
+	vector<string> arrDylibFiles;
+	vector<string> arrDisDylibFiles;
+	atimer.Reset();
+	ZBundle bundle;
+	bool bRet = bundle.SignFolder(&assets, strPath, "", "", "", arrDylibFiles, arrDisDylibFiles,
+								  true, false, true, excludeprovion);
+	atimer.PrintResult(bRet, ">>> Signed with %lu profiles %s!", (unsigned long)provs.count, bRet ? "OK" : "Failed");
+	completionHandler(bRet);
+	return bRet ? 0 : -1;
+}
+
 int checkCert(
 	NSString *prov,
 	NSString *key,

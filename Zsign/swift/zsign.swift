@@ -46,6 +46,28 @@ public enum Zsign {
 	static public func changeDylibPath(appExecutable: String, for old: String, with new: String) -> Bool {
 		ChangeDylibPath(appExecutable, old, new)
 	}
+	/// Signs an app bundle with a separate provisioning profile per bundle.
+	/// - Parameters:
+	///   - appPath: Path to the app bundle
+	///   - provisionPaths: The main app's profile first, then profiles for app extensions
+	///   - entitlementsPaths: Entitlements file per profile (same order; empty string to use the profile's)
+	///   - p12Path: Path to the key file
+	///   - p12Password: Password to the key file
+	///   - removeProvision: If `embedded.mobileprovision` should be excluded when signing
+	static public func signMulti(
+		appPath: String,
+		provisionPaths: [String],
+		entitlementsPaths: [String],
+		p12Path: String,
+		p12Password: String,
+		removeProvision: Bool = false,
+		completion: ((Bool) -> Void)? = nil
+	) -> Bool {
+		zsignMulti(appPath, provisionPaths, entitlementsPaths, p12Path, p12Password, removeProvision) { success in
+			completion?(success)
+		} == 0
+	}
+
 	/// Signs a folder (application bundle) using Zsign
 	/// - Parameters:
 	///   - appPath: Relative path to app bundle

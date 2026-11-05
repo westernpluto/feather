@@ -107,7 +107,17 @@ final class SigningHandler: NSObject {
 			try await _mergeEntitlements(for: movedAppPath, with: _options)
 		}
 		
-		let handler = ZsignHandler(appUrl: movedAppPath, options: _options, cert: appCertificate)
+		// Feather fork: when extension profiles are saved on the certificate, give
+		// every bundle (app + extensions) its own matching profile and entitlements.
+		var multiProfile: ZsignHandler.MultiProfile? = nil
+		if _options.signingOption == .default, let cert = appCertificate {
+			let extras = Storage.shared.getExtensionProfiles(for: cert)
+			if !extras.isEmpty {
+				multiProfile = try _prepareMultiProfile(for: movedAppPath, cert: cert, extensionProfiles: extras)
+			}
+		}
+		
+		let handler = ZsignHandler(appUrl: movedAppPath, options: _options, cert: appCertificate, multiProfile: multiProfile)
 		try await handler.disinject()
 		
 		if
@@ -541,6 +551,105 @@ extension SigningHandler {
 		try plistData.write(to: tempEntitlementsURL, options: .atomic)
 		
 		_options.appEntitlementsFile = tempEntitlementsURL
+	}
+	
+	// MARK: Per-bundle profiles (Feather fork)
+	
+	/// Builds the profile/entitlements list for Zsign: the main profile first, then
+	/// one exact-match profile per nested bundle (app extension or nested app).
+	private func _prepareMultiProfile(
+		for app: URL,
+		cert: CertificatePair,
+		extensionProfiles: [URL]
+	) throws -> ZsignHandler.MultiProfile {
+		guard let mainProfile = Storage.shared.getFile(.provision, from: cert) else {
+			throw SigningFileHandlerError.missingCertifcate
+		}
+		let mainIdentifier = _bundleIdentifier(of: app) ?? (_options.appIdentifier ?? _app.identifier ?? "")
+		let mainEntitlements: String
+		if let custom = _options.appEntitlementsFile?.path {
+			mainEntitlements = custom
+		} else {
+			mainEntitlements = try _bundleEntitlements(for: app, bundleIdentifier: mainIdentifier, profile: mainProfile)
+		}
+		
+		var provisions = [mainProfile.path]
+		var entitlements = [mainEntitlements]
+		
+		let decodedExtras = extensionProfiles.compactMap { url -> (URL, Certificate)? in
+			guard let decoded = CertificateReader(url).decoded else { return nil }
+			return (url, decoded)
+		}
+		
+		let nested = _enumerateFiles(at: app) { $0.hasSuffix(".appex") || $0.hasSuffix(".app") }
+		for bundleURL in nested {
+			guard let identifier = _bundleIdentifier(of: bundleURL) else { continue }
+			// Zsign matches profiles to bundles by exact App ID, so only exact profiles help.
+			guard let match = decodedExtras.first(where: { $0.1.bundleIdentifier == identifier }) else {
+				Logger.signing.info("No extension profile for \(identifier, privacy: .public); it will use the main profile")
+				continue
+			}
+			provisions.append(match.0.path)
+			entitlements.append(try _bundleEntitlements(for: bundleURL, bundleIdentifier: identifier, profile: match.0))
+			Logger.signing.info("Signing \(identifier, privacy: .public) with profile \(match.1.Name, privacy: .public)")
+		}
+		
+		return ZsignHandler.MultiProfile(provisionPaths: provisions, entitlementsPaths: entitlements)
+	}
+	
+	/// Reads CFBundleIdentifier from disk (Bundle caches Info.plist, which may be
+	/// stale after identifiers were changed above).
+	private func _bundleIdentifier(of bundle: URL) -> String? {
+		NSDictionary(contentsOf: bundle.appendingPathComponent("Info.plist"))?["CFBundleIdentifier"] as? String
+	}
+	
+	/// Entitlements for one bundle: the profile's, with wildcards resolved to the
+	/// bundle ID, plus the keychain groups the bundle's own binary asks for
+	/// (re-prefixed with the signing team), so shared keychain groups survive.
+	private func _bundleEntitlements(for bundle: URL, bundleIdentifier: String, profile: URL) throws -> String {
+		guard let decoded = CertificateReader(profile).decoded else { return "" }
+		let team = decoded.TeamIdentifier.first ?? ""
+		
+		func resolve(_ value: Any) -> Any {
+			if let string = value as? String { return string.replacingOccurrences(of: "*", with: bundleIdentifier) }
+			if let array = value as? [Any] { return array.map(resolve) }
+			if let dict = value as? [String: Any] { return dict.mapValues(resolve) }
+			if let any = value as? AnyCodable { return resolve(any.value) }
+			return value
+		}
+		
+		var result: [String: Any] = [:]
+		for (key, value) in decoded.Entitlements ?? [:] {
+			let raw = value.value
+			result[key] = (key == "application-identifier" || key == "com.apple.developer.associated-domains") ? raw : resolve(raw)
+		}
+		
+		if
+			let executableName = NSDictionary(contentsOf: bundle.appendingPathComponent("Info.plist"))?["CFBundleExecutable"] as? String,
+			case let executable = bundle.appendingPathComponent(executableName),
+			let binaryEntitlements = LCGetMachOEntitlements(executable.path),
+			let dict = (try? PropertyListSerialization.propertyList(from: binaryEntitlements, options: [], format: nil)) as? [String: Any],
+			let groups = dict["keychain-access-groups"] as? [String],
+			!team.isEmpty
+		{
+			let teamPrefixed = try NSRegularExpression(pattern: "^[A-Z0-9]{10}\\.")
+			var rewritten: [String] = []
+			for group in groups {
+				let range = NSRange(location: 0, length: group.utf16.count)
+				guard teamPrefixed.firstMatch(in: group, options: [], range: range) != nil, group.count > 11 else { continue }
+				let suffix = group.suffix(from: group.index(group.startIndex, offsetBy: 11))
+				let value = "\(team).\(suffix)"
+				if !rewritten.contains(value) { rewritten.append(value) }
+			}
+			if !rewritten.isEmpty {
+				result["keychain-access-groups"] = rewritten
+			}
+		}
+		
+		let data = try PropertyListSerialization.data(fromPropertyList: result, format: .xml, options: 0)
+		let url = _uniqueWorkDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("plist")
+		try data.write(to: url, options: .atomic)
+		return url.path
 	}
 	
 	private func _enumerateFiles(at base: URL, where predicate: (String) -> Bool) -> [URL] {

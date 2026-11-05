@@ -1,0 +1,53 @@
+name: Build Feather (multi-profile signing)
+
+# Builds this fork's Feather and publishes Feather.ipa as a pre-release, so it can
+# be downloaded on an iPhone and installed by signing it with an existing Feather.
+
+on:
+  push:
+    branches: [multi-profile-signing, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.0.app
+          xcodebuild -version
+
+      - name: Build
+        run: |
+          set -o pipefail
+          agvtool new-version -all ${{ github.run_number }}
+          make iphoneos 2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)|\*\* " || true
+          test -f packages/Feather.ipa
+
+      - name: Show compiler errors
+        if: failure()
+        run: grep -E "error:" -B2 -A3 build.log | head -150 || true
+
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: multi-profile-${{ github.run_number }}
+          name: Feather multi-profile build ${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          body: |
+            Feather with per-bundle provisioning profiles for app extensions
+            (branch `${{ github.ref_name }}`, commit ${{ github.sha }}).
+
+            Install: download Feather.ipa on your iPhone and sign it with your current Feather.
+            Then open a certificate in Settings → Certificates and use **Add Extension Profile**.
+          files: packages/Feather.ipa

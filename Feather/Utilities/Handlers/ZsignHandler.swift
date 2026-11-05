@@ -15,15 +15,24 @@ final class ZsignHandler {
 	private var _appUrl: URL
 	private var _options: Options
 	private var _certificate: CertificatePair?
+	private var _multiProfile: MultiProfile?
+	
+	/// Feather fork: one provisioning profile (and entitlements file) per bundle.
+	struct MultiProfile {
+		var provisionPaths: [String]
+		var entitlementsPaths: [String]
+	}
 	
 	init(
 		appUrl: URL,
 		options: Options = OptionsManager.shared.options,
-		cert: CertificatePair? = nil
+		cert: CertificatePair? = nil,
+		multiProfile: MultiProfile? = nil
 	) {
 		self._appUrl = appUrl
 		self._options = options
 		self._certificate = cert
+		self._multiProfile = multiProfile
 	}
 	
 	func disinject() async throws {
@@ -42,6 +51,23 @@ final class ZsignHandler {
 	func sign() async throws {
 		guard let cert = _certificate else {
 			throw SigningFileHandlerError.missingCertifcate
+		}
+		
+		if let multi = _multiProfile {
+			let _ = Zsign.signMulti(
+				appPath: _appUrl.relativePath,
+				provisionPaths: multi.provisionPaths,
+				entitlementsPaths: multi.entitlementsPaths,
+				p12Path: Storage.shared.getFile(.certificate, from: cert)?.path ?? "",
+				p12Password: cert.password ?? "",
+				removeProvision: !_options.removeProvisioning,
+				completion: { success in
+					if !success {
+						self.hadError = SigningFileHandlerError.signFailed
+					}
+				}
+			)
+			return
 		}
 
 		let _ = Zsign.sign(

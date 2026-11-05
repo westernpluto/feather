@@ -13,6 +13,9 @@ import Zsign
 struct CertificatesInfoView: View {
 	@Environment(\.dismiss) var dismiss
 	@State var data: Certificate?
+	@State private var _extensionProfiles: [URL] = []
+	@State private var _isImportingProfile = false
+	@State private var _profileError: String?
 	
 	var cert: CertificatePair
 	
@@ -34,6 +37,8 @@ struct CertificatesInfoView: View {
 					_miscSection(data: data)
 				}
 				
+				_extensionProfilesSection
+				
 				Section {
 					Button(.localized("Open in Files"), systemImage: "folder") {
 						UIApplication.open(Storage.shared.getUuidDirectory(for: cert)!.toSharedDocumentsURL()!)
@@ -46,6 +51,63 @@ struct CertificatesInfoView: View {
 		}
 		.onAppear {
 			data = Storage.shared.getProvisionFileDecoded(for: cert)
+			_reloadExtensionProfiles()
+		}
+		.fileImporter(isPresented: $_isImportingProfile, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+			guard case .success(let urls) = result else { return }
+			_profileError = nil
+			for url in urls {
+				let scoped = url.startAccessingSecurityScopedResource()
+				defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+				do {
+					try Storage.shared.addExtensionProfile(from: url, to: cert)
+				} catch {
+					_profileError = error.localizedDescription
+				}
+			}
+			_reloadExtensionProfiles()
+		}
+	}
+}
+
+// MARK: - Extension: Extension profiles (Feather fork)
+extension CertificatesInfoView {
+	private func _reloadExtensionProfiles() {
+		_extensionProfiles = Storage.shared.getExtensionProfiles(for: cert)
+	}
+	
+	@ViewBuilder
+	private var _extensionProfilesSection: some View {
+		Section {
+			ForEach(_extensionProfiles, id: \.self) { url in
+				let decoded = CertificateReader(url).decoded
+				VStack(alignment: .leading, spacing: 2) {
+					Text(verbatim: decoded?.Name ?? url.lastPathComponent)
+					Text(verbatim: decoded?.bundleIdentifier ?? "")
+						.font(.footnote)
+						.foregroundStyle(.secondary)
+				}
+				.swipeActions {
+					Button(role: .destructive) {
+						Storage.shared.removeExtensionProfile(url)
+						_reloadExtensionProfiles()
+					} label: {
+						Label(String.localized("Delete"), systemImage: "trash")
+					}
+				}
+			}
+			Button(String.localized("Add Extension Profile"), systemImage: "plus") {
+				_isImportingProfile = true
+			}
+			if let _profileError {
+				Text(verbatim: _profileError)
+					.font(.footnote)
+					.foregroundStyle(.red)
+			}
+		} header: {
+			Text(String.localized("Extension Profiles"))
+		} footer: {
+			Text(String.localized("Profiles for app extensions, such as a notification service. When signing, each extension whose bundle ID exactly matches one of these profiles is signed with it and its own entitlements, instead of this certificate's main profile. Make each profile from the same team and certificate."))
 		}
 	}
 }
