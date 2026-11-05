@@ -69,7 +69,10 @@ struct ExtendedTabbarView: View {
 				}
 			}
 			.defaultVisibility(.hidden, for: .tabBar)
-			.hidden(horizontalSizeClass == .compact)
+			// Feather fork: this per-source group is meant for the iPad sidebar. On
+			// iPhone Duo's inner display the vertical tab bar shows it anyway, which
+			// duplicates the Sources tab ("Repositories", then one tab per source).
+			.hidden(horizontalSizeClass == .compact || UIDevice.current.userInterfaceIdiom != .pad)
 		}
 		.tabViewStyle(.sidebarAdaptable)
 		.tabViewCustomization($customization)
