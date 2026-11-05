@@ -181,7 +181,9 @@ bool ZBundle::GenerateCodeResources(const string& strFolder, jvalue& jvCodeRes)
 	jvCodeRes["files2"] = jvalue(jvalue::E_OBJECT);
 
 	for (string strKey : setFiles) {
-		if (m_bRemoveProvision && strKey == "embedded.mobileprovision") {
+		// Only the main app's profile is subject to this (unchanged upstream behavior);
+		// a nested bundle's profile, written just before sealing, must stay sealed.
+		if (m_bRemoveProvision && strKey == "embedded.mobileprovision" && strFolder == m_strAppFolder) {
 			string strProvFile = strFolder + "/embedded.mobileprovision";
 			remove(strProvFile.c_str());
 			ZLog::Print(">>> Removed embedded.mobileprovision\n");
@@ -375,6 +377,35 @@ bool ZBundle::SignNode(jvalue& jvNode)
 		}
 	}
 
+	if (m_pSignAssets) {
+		// Multi-profile signing: pick the profile whose App ID is exactly
+		// "<TEAMID>.<bundle id>", falling back to the main (first) profile.
+		// This must happen BEFORE CodeResources is generated: a nested bundle's
+		// embedded.mobileprovision is part of that bundle's sealed resources, and
+		// writing it after sealing breaks the signature ("integrity could not be
+		// verified" on device).
+		m_pSignAsset = &m_pSignAssets->front();
+		const string strSuffix = "." + strBundleId;
+		for (auto it = m_pSignAssets->begin(); it != m_pSignAssets->end(); ++it) {
+			const string& strAppId = it->m_strApplicationId;
+			if (strAppId.size() > strSuffix.size() &&
+				0 == strAppId.compare(strAppId.size() - strSuffix.size(), strSuffix.size(), strSuffix)) {
+				m_pSignAsset = &(*it);
+				break;
+			}
+		}
+		ZLog::PrintV(">>> Profile: \t%s -> %s\n", strBundleId.c_str(), m_pSignAsset->m_strApplicationId.c_str());
+
+		// The root's profile is handled by SignFolder(); nested bundles get theirs here.
+		// (Feather passes bRemoveProvision = true to mean "embed the profile".)
+		if ("/" != strFolder && m_bRemoveProvision && !m_pSignAsset->m_strProvData.empty()) {
+			if (!ZFile::WriteFileV(m_pSignAsset->m_strProvData, "%s/embedded.mobileprovision", strBaseFolder.c_str())) {
+				ZLog::ErrorV(">>> Can't write embedded.mobileprovision! %s\n", strFolder.c_str());
+				return false;
+			}
+		}
+	}
+
 	ZFile::CreateFolderV("%s/_CodeSignature", strBaseFolder.c_str());
 	string strCodeResFile = strBaseFolder + "/_CodeSignature/CodeResources";
 
@@ -418,40 +449,6 @@ bool ZBundle::SignNode(jvalue& jvNode)
 	if (!ZFile::WriteFile(strCodeResFile.c_str(), strCodeResData)) {
 		ZLog::ErrorV("\tWriting CodeResources failed! %s\n", strCodeResFile.c_str());
 		return false;
-	}
-
-	if (m_pSignAssets) {
-		auto endsWith = [](const string& str, const string& suffix) {
-			return str.size() >= suffix.size() && 0 == str.compare(str.size()-suffix.size(), suffix.size(), suffix);
-		};
-
-		for (auto it = m_pSignAssets->rbegin(); it != m_pSignAssets->rend(); ++it) {
-			m_pSignAsset = &(*it);
-			if (endsWith(m_pSignAsset->m_strApplicationId, strBundleId)) {
-				if (!ZFile::WriteFileV(m_pSignAsset->m_strProvData, "%s/%s/embedded.mobileprovision", m_strAppFolder.c_str(), strFolder.c_str())) {
-					ZLog::ErrorV(">>> Can't write embedded.mobileprovision!\n");
-					return false;
-				}
-				break;
-			}
-		}
-	}
-
-	if (m_pSignAssets) {
-		auto endsWith = [](const string& str, const string& suffix) {
-			return str.size() >= suffix.size() && 0 == str.compare(str.size()-suffix.size(), suffix.size(), suffix);
-		};
-
-		for (auto it = m_pSignAssets->rbegin(); it != m_pSignAssets->rend(); ++it) {
-			m_pSignAsset = &(*it);
-			if (endsWith(m_pSignAsset->m_strApplicationId, strBundleId)) {
-				if (!ZFile::WriteFileV(m_pSignAsset->m_strProvData, "%s/%s/embedded.mobileprovision", m_strAppFolder.c_str(), strFolder.c_str())) {
-					ZLog::ErrorV(">>> Can't write embedded.mobileprovision!\n");
-					return false;
-				}
-				break;
-			}
-		}
 	}
 
 	if (!macho.Sign(m_pSignAsset, bForceSign, strBundleId, strInfoSHA1, strInfoSHA256, strCodeResData)) {
